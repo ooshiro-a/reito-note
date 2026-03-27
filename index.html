@@ -119,6 +119,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI',san
 .ref-info-box{min-height:44px;display:flex;align-items:center;font-size:11px;color:var(--text2);line-height:1.5;padding:4px 0;flex-wrap:wrap}
 .tab-content{display:none;padding-top:4px}
 .tab-content.active{display:block}
+.btn-sheet{width:100%;height:50px;background:var(--green);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;letter-spacing:0.02em;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-sheet:active{opacity:0.8;transform:scale(0.99)}
+.btn-sheet:disabled{opacity:0.5;cursor:not-allowed}
+.sheet-status{font-size:12px;color:var(--text3);text-align:center;margin-top:6px;min-height:18px}
 </style>
 </head>
 <body>
@@ -226,6 +230,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI',san
 
 <!-- 記録一覧 -->
 <div id="tab-records" class="tab-content">
+  <button class="btn-sheet" id="sheet-btn" onclick="sendToSheet()">📊 スプレッドシートに送信</button>
+  <div class="sheet-status" id="sheet-status"></div>
   <div id="records-list"></div>
 </div>
 
@@ -290,6 +296,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI',san
 
 <script>
 const STORAGE_KEY='reito_note_v3';
+const GAS_URL='https://script.google.com/macros/s/AKfycbxUDu6tG2MZe0b1UtxzzD0BF2IpfMSZe0nE7DVgg0CgCnWKmcW2x9QCwUkZsv-GKbiWog/exec';
 let records=[];
 const REFRIGERANTS={
   R404A:{name:'R404A',info:'低温冷凍・製氷機に多用。高GWP冷媒（代替移行中）。',evap:{'-25':0.28,'-20':0.34,'-15':0.44,'-10':0.53,'-5':0.63,'0':0.73,'5':0.85,'10':0.98},cond:{'30':1.49,'35':1.65,'40':1.83,'45':2.01,'50':2.19,'55':2.39,'60':2.60},normalHP:[1.6,2.2],normalLP:[0.40,0.75],maxDischarge:90},
@@ -316,6 +323,33 @@ function updateTheoryPreview(){const amb=parseFloat(document.getElementById('amb
 function diagnose(hp,lp,td,ts,amb,indoor,refKey){const ref=REFRIGERANTS[refKey];const theory=getTheory(refKey,amb,indoor);let issues=[],status='ok';const pressRatio=hp/lp,superheat=ts-(isNaN(indoor)?0:indoor);if(theory){const hd=hp-theory.theoryHP,ld=lp-theory.theoryLP;if(hd>0.3){issues.push(`高圧が理論値より${hd.toFixed(2)}MPa高い：凝縮器汚れ・風量不足の可能性`);status='ng';}else if(hd>0.15){issues.push(`高圧が理論値よりやや高め（+${hd.toFixed(2)}MPa）：凝縮器の状態を確認`);if(status!=='ng')status='warn';}else if(hd<-0.25){issues.push(`高圧が理論値より${Math.abs(hd).toFixed(2)}MPa低い：冷媒不足の可能性`);if(status!=='ng')status='warn';}if(ld<-0.12){issues.push(`低圧が理論値より${Math.abs(ld).toFixed(2)}MPa低い：冷媒不足・膨張弁閉塞の可能性`);status='ng';}else if(ld<-0.06){issues.push(`低圧がやや低め（${ld.toFixed(2)}MPa）：蒸発器・膨張弁の確認推奨`);if(status!=='ng')status='warn';}}if(pressRatio>7){issues.push('圧縮比が高すぎる（7超）：コンプレッサー負荷大');status='ng';}else if(pressRatio>5.5){issues.push('圧縮比がやや高い（5.5〜7）：運転状態に注意');if(status!=='ng')status='warn';}if(td>ref.maxDischarge+10){issues.push(`吐出温度が高い（${td}℃）：過熱・冷媒不足の可能性`);status='ng';}else if(td>ref.maxDischarge){issues.push(`吐出温度が高め（${td}℃）：基準値${ref.maxDischarge}℃を超過`);if(status!=='ng')status='warn';}if(superheat<3){issues.push('過熱度不足（3℃未満）：液バック注意');status='ng';}else if(superheat>15){issues.push('過熱度過大（15℃超）：冷媒不足・膨張弁開度不足の可能性');if(status!=='ng')status='warn';}return{status,label:status==='ok'?'正常':status==='warn'?'要注意':'要点検',msg:issues.length===0?'各データ正常範囲内。冷凍サイクル良好です。':issues.join('　/　'),pressRatio:pressRatio.toFixed(2),superheat:superheat.toFixed(1),theory};}
 function loadRecords(){try{const d=localStorage.getItem(STORAGE_KEY);if(d)records=JSON.parse(d);}catch(e){records=[];}renderRecords();}
 function saveToStorage(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(records));}catch(e){}}
+async function sendToSheet(){
+  if(records.length===0){alert('送信する記録がありません');return;}
+  const btn=document.getElementById('sheet-btn');
+  const status=document.getElementById('sheet-status');
+  btn.disabled=true;
+  btn.textContent='📊 送信中...';
+  status.textContent='';
+  let success=0,fail=0;
+  for(const r of records){
+    try{
+      const payload={
+        date:r.date,site:r.site,model:r.model,type:r.type,refrigerant:r.refrigerant,
+        amb:isNaN(r.amb)?'':r.amb,indoor:isNaN(r.indoor)?'':r.indoor,settemp:isNaN(r.settemp)?'':r.settemp,
+        hp:isNaN(r.hp)?'':r.hp,lp:isNaN(r.lp)?'':r.lp,td:isNaN(r.td)?'':r.td,ts:isNaN(r.ts)?'':r.ts,amp:isNaN(r.amp)?'':r.amp,
+        pressRatio:r.diag.pressRatio,superheat:r.diag.superheat,label:r.diag.label,msg:r.diag.msg,
+        note:r.note||'',isPartial:r.isPartial||false
+      };
+      const res=await fetch(GAS_URL,{method:'POST',body:JSON.stringify(payload)});
+      const json=await res.json();
+      if(json.result==='success')success++;else fail++;
+    }catch(e){fail++;}
+  }
+  btn.disabled=false;
+  btn.textContent='📊 スプレッドシートに送信';
+  if(fail===0){status.textContent=`✅ ${success}件の記録を送信しました！`;}
+  else{status.textContent=`⚠️ ${success}件成功 / ${fail}件失敗`;}
+}
 function showTab(name){document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['input','records','scale','reference'][i]===name));document.getElementById('tab-'+name).classList.add('active');if(name==='records')renderRecords();if(name==='scale'){renderScaleBtns();renderScaleGrid();}}
 function val(id){return parseFloat(document.getElementById(id).value);}
 function str(id){return document.getElementById(id).value.trim();}
