@@ -480,7 +480,7 @@ async function sendSelectedRecords(){
     
     const response=await fetch(gasUrl,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'text/plain'},
       body:JSON.stringify(selectedRecords),
       redirect:'follow'
     });
